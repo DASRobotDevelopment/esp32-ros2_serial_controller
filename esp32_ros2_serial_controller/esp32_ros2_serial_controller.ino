@@ -2,26 +2,26 @@
   ROS2-ESP32 Serial controller для четырехколесного робота.
 
   Назначение:
-  - Прием команд по Serial от ROS2-узла / ПК и управление 4-мя моторами.
+  - Прием команд по Serial от ROS2-узла / ПК и управление моторами.
   - Поддержка прямой установки PWM, задания целевых RPM и настройки PID.
-  - Отправка на хост текущих значений энкодеров, RPM и отладочной информации.
+  - Отправка на хост текущих значений энкодеров.
 
   Формат команд:
     e
       Запрос счетчиков энкодеров.
       Ответ:  e,<enc0>,<enc1>,<enc2>,<enc3>
 
-    m,<pwm0>,<pwm1>,<pwm2>,<pwm3>
+    m,<+000>,<+000>,<+000>,<+000>
+      Важно! Команда должна быть строго заданного формата!
       Прямая установка PWM для каждого мотора (обход PID).
 
-    v,<rpm0>,<rpm1>,<rpm2>,<rpm3>
+    v,+010,+010,-010,+050
+      Важно! Команда должна быть строго заданного формата!
       Задание целевых RPM для PID-контроллеров всех моторов.
 
-    p,<kp>,<ki>,<kd>
+    p,<0.00>,<0.00>,<0.00>
+      Важно! Команда должна быть строго заданного формата!
       Установка PID-параметров (одинаковых) для всех моторов.
-
-    t
-      Тестовая / отладочная информация по каждому PID-контроллеру.
 
   Параметры оборудования задаются через:
     NUMBER_OF_WHEELS – количество колес/мотор-энкодерных пар,
@@ -40,143 +40,126 @@
 #include "MotorEncoder.h"
 #include "PIDController.h"
 
-const int NUMBER_OF_WHEELS = 4;
+// Параметры, которые нужно задать пользователю.
 const int MOTOR_PPR        = 988;
 const int MOTOR_MAX_RPM    = 200;
 const int PID_UPDATE_FREQ  = 50;
+const int NUMBER_OF_WHEELS = 4;
 
-Motor         motors[NUMBER_OF_WHEELS];
-MotorEncoder  encoders[NUMBER_OF_WHEELS];
+// Переменные для работы основных функций.
+float targetRPMOfWheels[NUMBER_OF_WHEELS];
+float targetPWMOfWheels[NUMBER_OF_WHEELS];
+int separators[6][2] = {
+  {2, 6},
+  {7, 11},
+  {12, 16},
+  {17, 21},
+  {22, 26},
+  {27, 31} 
+};
+
+char inputChar;
+String inputString;
+
+// Инициализация элементов базы робота.
+Motor motors[NUMBER_OF_WHEELS];
+MotorEncoder encoders[NUMBER_OF_WHEELS];
 PIDController pidControllers[NUMBER_OF_WHEELS];
-float         targetRPM[NUMBER_OF_WHEELS];
 
-char   cmdBuffer[64];
-uint8_t cmdIndex = 0;
 
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(115200);          
 
   for (int i = 0; i < NUMBER_OF_WHEELS; i++) {
-    motors[i]   = Motor(motorPins[i][0], motorPins[i][1]);
-    encoders[i] = MotorEncoder(encoderPins[i][0], encoderPins[i][1]);
-    pidControllers[i] = PIDController(&motors[i], &encoders[i],
-                                      MOTOR_PPR, MOTOR_MAX_RPM, PID_UPDATE_FREQ);
+    motors[i] = Motor(motorPins[i][0], motorPins[i][1]);
     motors[i].begin();
+    encoders[i] = MotorEncoder(encoderPins[i][0], encoderPins[i][1]);
     encoders[i].begin();
+    pidControllers[i] = PIDController(&motors[i], &encoders[i], MOTOR_PPR, MOTOR_MAX_RPM, PID_UPDATE_FREQ);
   }
+
 }
 
 void loop() {
-  for (int i = 0; i < NUMBER_OF_WHEELS; i++) {
+
+  for(int i = 0; i < NUMBER_OF_WHEELS; i++){
     pidControllers[i].computePWM();
-  }
+  } 
 
-  static unsigned long lastSerialCheck = 0;
-  unsigned long now = millis();
-  if (now - lastSerialCheck >= 10) {
-    handleSerial();
-    lastSerialCheck = now;
-  }
 }
 
-void handleSerial() {
+// Работа с последовательным портом //
+void serialEvent() {
+
   while (Serial.available()) {
-    char c = Serial.read();
-
-    if (c != '\n' && c != '\r') {
-      if (cmdIndex < sizeof(cmdBuffer) - 1) {
-        cmdBuffer[cmdIndex++] = c;
-      }
-      continue;
-    }
-
-    cmdBuffer[cmdIndex] = '\0';
-    if (cmdIndex > 0) {
-      processCommand(cmdBuffer);
-    }
-    cmdIndex = 0;
-  }
-}
-
-void processCommand(const char* cmd) {
-  char command = cmd[0];
-
-  switch (command) {
-    case 'e': sendEncoderData();        break;
-    case 'm': parsePWM(cmd + 1);        break;
-    case 'v': parseTargetRPM(cmd + 1);  break;
-    case 'p': parsePID(cmd + 1);        break;
-    case 't': sendTestInfo();           break;
-    default:                             break;
-  }
-}
-
-int parseIntList(const char* s, int* out, int maxCount) {
-  int count = 0;
-  while (*s && count < maxCount) {
-    while (*s == ',' || *s == ' ') s++;
-    if (!*s) break;
-    int val;
-    if (sscanf(s, "%d", &val) != 1) break;
-    out[count++] = val;
-    while (*s && *s != ',') s++;
-  }
-  return count;
-}
-
-int parseFloatList(const char* s, float* out, int maxCount) {
-  int count = 0;
-  while (*s && count < maxCount) {
-    while (*s == ',' || *s == ' ') s++;
-    if (!*s) break;
-    float val;
-    if (sscanf(s, "%f", &val) != 1) break;
-    out[count++] = val;
-    while (*s && *s != ',') s++;
-  }
-  return count;
-}
-
-// m,100,100,100,100
-void parsePWM(const char* cmd) {
-  int values[NUMBER_OF_WHEELS];
-  int count = parseIntList(cmd + 1, values, NUMBER_OF_WHEELS);
-  for (int i = 0; i < count; i++) {
-    motors[i].setPWM(values[i]);
-  }
-}
-
-// v,100,100,100,100
-void parseTargetRPM(const char* cmd) {
-  float values[NUMBER_OF_WHEELS];
-  int count = parseFloatList(cmd + 1, values, NUMBER_OF_WHEELS);
-  for (int i = 0; i < count; i++) {
-    targetRPM[i] = values[i];
-    pidControllers[i].setTargetRPM(values[i]);
-  }
-}
-
-// p,1.2,0.1,0.05
-void parsePID(const char* cmd) {
-  float kp, ki, kd;
-  if (sscanf(cmd + 1, ",%f,%f,%f", &kp, &ki, &kd) == 3) {
-    for (int i = 0; i < NUMBER_OF_WHEELS; i++) {
-      pidControllers[i].setPIDParameters(kp, ki, kd);
+    inputChar = Serial.read();
+    inputString += inputChar;
+    if (inputChar == '\n') {
+      processCommand();
+      inputString = ""; 
     }
   }
+
+}
+
+void processCommand() {
+
+  if (inputString.startsWith("e")) sendEncoderData();
+  if (inputString.startsWith("v")) parseTargetRPM();
+  if (inputString.startsWith("m")) parseTargetPWM();
+  if (inputString.startsWith("p")) parseTargetPID();
+
 }
 
 void sendEncoderData() {
-  Serial.print('e');
-  for (int i = 0; i < NUMBER_OF_WHEELS; i++) {
-    Serial.print(',');
-    Serial.print(encoders[i].getCount());
+  Serial.print("e,");
+  for(int i = 0; i < NUMBER_OF_WHEELS; i++){
+    if(i == NUMBER_OF_WHEELS - 1){
+      Serial.println(encoders[i].getCount());
+    }
+    else{
+      Serial.print(encoders[i].getCount());
+      Serial.print(",");
+    }
   }
-  Serial.println();
 }
 
-void sendTestInfo() {
-  for (int i = 0; i < NUMBER_OF_WHEELS; i++) {
-    pidControllers[i].showTestInfo();
-  }
+void parseTargetRPM() {
+  for(int i = 0; i < NUMBER_OF_WHEELS; i++){
+    targetRPMOfWheels[i] = inputString.substring(separators[i][0], separators[i][1]).toFloat();
+    pidControllers[i].setTargetRPM(targetRPMOfWheels[i]);
+    
+    // TEST INFO
+    // Serial.print("Set RPM");
+    // Serial.println(targetRPMOfWheels[i]);
+  }  
+}
+
+void parseTargetPWM() {
+    for(int i = 0; i < NUMBER_OF_WHEELS; i++){
+    targetPWMOfWheels[i] = inputString.substring(separators[i][0], separators[i][1]).toFloat();
+    motors[i].setPWM(targetPWMOfWheels[i]);
+    
+    // TEST INFO
+    // Serial.print("Set PWM");
+    // Serial.println(targetPWMOfWheels[i]);
+  }  
+}
+
+void parseTargetPID() {
+    float kp = inputString.substring(2, 6).toFloat();
+    float ki = inputString.substring(7, 11).toFloat();
+    float kd = inputString.substring(12, 16).toFloat();
+    for(int i = 0; i < NUMBER_OF_WHEELS; i++){
+      pidControllers[i].setPIDParameters(kp, ki, kd);
+    }   
+    
+    // TEST INFO
+    // Serial.print("PID:");
+    // Serial.print("kp - ");
+    // Serial.print(kp);
+    // Serial.print("ki - ");
+    // Serial.print(ki);
+    // Serial.print("kd - ");
+    // Serial.println(kd); 
 }

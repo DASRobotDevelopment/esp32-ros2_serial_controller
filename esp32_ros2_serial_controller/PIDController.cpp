@@ -44,35 +44,34 @@ void PIDController::computePWM() {
   float limitedOutput = constrain(output, -255, 255);
   _motor->setPWM(limitedOutput);
 
-  if (_testInfo) {
-    Serial.println();
-    Serial.print("PID info:"); 
-    Serial.print(" Kp: ");  
-    Serial.print(_Kp); 
-    Serial.print(" Ki: ");  
-    Serial.print(_Ki); 
-    Serial.print(" Kd: ");  
-    Serial.print(_Kd);
+  // TEST INFO
+  // Serial.println();
+  // Serial.print("PID info:"); 
+  // Serial.print(" Kp: ");  
+  // Serial.print(_Kp); 
+  // Serial.print(" Ki: ");  
+  // Serial.print(_Ki); 
+  // Serial.print(" Kd: ");  
+  // Serial.print(_Kd);
 
-    Serial.print(" EncoderCount: ");
-    Serial.print(encoderCount);
+  // Serial.print(" EncoderCount: ");
+  // Serial.print(encoderCount);
 
-    Serial.print(" TargetRPM: ");
-    Serial.print(_targetRPM);
+  // Serial.print(" TargetRPM: ");
+  // Serial.print(_targetRPM);
 
-    Serial.print(" CurrentRPM: ");
-    Serial.print(currentRPM);
+  // Serial.print(" CurrentRPM: ");
+  // Serial.print(currentRPM);
 
-    Serial.print(" DeltaEncoderCount: ");
-    Serial.print(deltaEncoderCount);
+  // Serial.print(" DeltaEncoderCount: ");
+  // Serial.print(deltaEncoderCount);
 
-    Serial.print(" Error: ");
-    Serial.print(error);
-    
-    Serial.print(" Output: ");
-    Serial.print(limitedOutput);
-    Serial.println();
-  }
+  // Serial.print(" Error: ");
+  // Serial.print(error);
+  
+  // Serial.print(" Output: ");
+  // Serial.print(limitedOutput);
+  // Serial.println();
 }
 
 void PIDController::stopMotor() {
